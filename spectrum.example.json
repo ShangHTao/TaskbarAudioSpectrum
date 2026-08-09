@@ -1,0 +1,55 @@
+{
+  "_comment": "Default professional spectrum configuration; full documentation: https://github.com/ShangHTao/TaskbarAudioSpectrum/wiki/Configuration",
+  "audio": {
+    "fftSize": 16384,
+    "overlapPercent": 75,
+    "windowFunction": "hann"
+  },
+  "spectrum": {
+    "bands": 28,
+    "frequencyScale": "thirdOctave",
+    "minFrequency": 31.5,
+    "maxFrequency": 16000,
+    "minCenterFrequency": 31.5,
+    "maxCenterFrequency": 16000,
+    "referenceFrequency": 1000,
+    "bandAggregation": "energy",
+    "frequencyWeighting": "none",
+    "foldBelowMinimum": false,
+    "sensitivity": 100,
+    "minimumDecibels": -72,
+    "maximumDecibels": -6,
+    "attackMs": 20,
+    "releaseMs": 220
+  },
+  "peak": {
+    "enabled": true,
+    "showWhenSilent": true,
+    "holdMs": 160,
+    "gravity": 3.2,
+    "height": 2,
+    "gap": 1
+  },
+  "silence": {
+    "enabled": false,
+    "threshold": 0.015,
+    "hideDelayMs": 500
+  },
+  "display": {
+    "framesPerSecond": 30,
+    "barColor": "#FF78D4",
+    "secondColor": "#00C2FF",
+    "opacity": 180,
+    "barWidthPercent": 48
+  },
+  "position": {
+    "automatic": true,
+    "leftOffset": 66,
+    "rightOffset": 10,
+    "topOffset": 5,
+    "bottomOffset": 5
+  },
+  "startup": {
+    "startWithWindows": false
+  }
+}

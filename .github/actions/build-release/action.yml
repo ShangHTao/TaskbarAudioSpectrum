@@ -1,0 +1,35 @@
+name: Build release artifacts
+description: Configure, build, test, and package all Windows targets
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: choco install ninja --yes --no-progress
+    - uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
+    - shell: pwsh
+      run: |
+        $root = Join-Path $env:RUNNER_TEMP 'windhawk'
+        $installer = Join-Path $root 'windhawk_setup_offline.exe'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        Invoke-WebRequest `
+          'https://github.com/ramensoftware/windhawk/releases/download/v1.7.3/windhawk_setup_offline.exe' `
+          -OutFile $installer
+        $expected = '4D93016570F982326EEBDFC9068E924FF21F6448534EA32672BB4C1D52A8193B'
+        if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne $expected) {
+          throw 'Windhawk installer hash mismatch.'
+        }
+        $process = Start-Process $installer -ArgumentList '/S','/PORTABLE' `
+          -WorkingDirectory $root -WindowStyle Hidden -Wait -PassThru
+        if ($process.ExitCode) { throw "Installer failed: $($process.ExitCode)" }
+        $compiler = Get-ChildItem $root -Directory -Recurse | Where-Object {
+          Test-Path (Join-Path $_.FullName 'bin\clang++.exe')
+        } | Select-Object -First 1 -ExpandProperty FullName
+        "WINDHAWK_COMPILER_ROOT=$compiler" >> $env:GITHUB_ENV
+    - shell: pwsh
+      run: |
+        cmake --preset windows-ci
+        cmake --build --preset windows-ci
+        ctest --preset windows-ci
+        cpack --config build/windows-ci/CPackConfig.cmake

@@ -1,0 +1,79 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-local-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "TAS_BUILD_DIAGNOSTICS": "ON"
+      }
+    },
+    {
+      "name": "windows-debug",
+      "inherits": "windows-local-base",
+      "displayName": "Windows MSVC Debug"
+    },
+    {
+      "name": "windows-release",
+      "inherits": "windows-local-base",
+      "displayName": "Windows MSVC Release"
+    },
+    {
+      "name": "windows-ci-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_LINKER": "link.exe",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "TAS_BUILD_DIAGNOSTICS": "ON"
+      }
+    },
+    {
+      "name": "windows-ci",
+      "inherits": "windows-ci-base",
+      "displayName": "Windows MSVC + Windhawk CI",
+      "cacheVariables": {
+        "TAS_BUILD_WINDHAWK": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release"
+    },
+    { "name": "windows-ci", "configurePreset": "windows-ci" }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-debug",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-ci",
+      "configurePreset": "windows-ci",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  standalone:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        preset: [windows-debug, windows-release]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check repository formatting
+        shell: pwsh
+        run: git log -1 --check --oneline
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  windhawk:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build validated release targets
+        uses: ./.github/actions/build-release
+      - name: Verify deterministic Windhawk source
+        shell: pwsh
+        run: |
+          $path = 'build/windows-ci/generated/taskbar-audio-spectrum.wh.cpp'
+          $first = Get-FileHash $path
+          Remove-Item -LiteralPath $path
+          cmake --build --preset windows-ci --target tas_windhawk_source
+          $second = Get-FileHash $path
+          if ($first.Hash -ne $second.Hash) { throw 'Generated source changed.' }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: TaskbarAudioSpectrum-windows
+          path: |
+            build/windows-ci/TaskbarAudioSpectrum.exe
+            build/windows-ci/taskbar-audio-spectrum-x86.dll
+            build/windows-ci/taskbar-audio-spectrum-x64.dll
+            build/windows-ci/generated/taskbar-audio-spectrum.wh.cpp
+            build/windows-ci/TaskbarAudioSpectrum-*-win64.zip

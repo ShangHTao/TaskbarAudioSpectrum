@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ['v1.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate tag
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($env:GITHUB_REF_NAME -notmatch "^v$([regex]::Escape($version))(-(?:alpha|beta|rc)\.\d+)?$") {
+            throw "Tag $env:GITHUB_REF_NAME does not match VERSION $version."
+          }
+      - name: Build validated artifacts
+        uses: ./.github/actions/build-release
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          $root = 'build/windows-ci/release-assets'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          Copy-Item build/windows-ci/TaskbarAudioSpectrum.exe $root
+          $package = Get-ChildItem build/windows-ci/TaskbarAudioSpectrum-*-win64.zip |
+            Select-Object -First 1
+          if (-not $package) { throw 'Release package was not produced.' }
+          Copy-Item -LiteralPath $package.FullName -Destination $root
+          Copy-Item build/windows-ci/generated/taskbar-audio-spectrum.wh.cpp $root
+          Get-ChildItem $root -File | Sort-Object Name | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(),$_.Name
+          } | Set-Content "$root/SHA256SUMS.txt" -Encoding utf8NoBOM
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $args = @('release','create',$env:GITHUB_REF_NAME,'--verify-tag',
+            '--title',"Taskbar Audio Spectrum $env:GITHUB_REF_NAME",
+            '--generate-notes')
+          $notes = ".github/release-notes/$env:GITHUB_REF_NAME.md"
+          if (Test-Path $notes) {
+            $args = $args | Where-Object { $_ -ne '--generate-notes' }
+            $args += @('--notes-file',$notes)
+          }
+          if ($env:GITHUB_REF_NAME -match '-') { $args += '--prerelease' }
+          $args += Get-ChildItem build/windows-ci/release-assets -File |
+            Select-Object -ExpandProperty FullName
+          gh @args

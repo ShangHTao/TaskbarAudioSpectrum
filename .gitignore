@@ -1,0 +1,13 @@
+*.dll
+*.exe
+*.pdb
+*.obj
+*.ilk
+*.nativecodeanalysis.xml
+*.log
+spectrum.json
+.vs/
+build/
+.cache/
+.cmake/
+_CPack_Packages/
