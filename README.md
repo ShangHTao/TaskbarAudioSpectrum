@@ -56,7 +56,7 @@ not eligible to appear, reducing unnecessary work.
 
 ## Install the standalone application
 
-1. Download `TaskbarAudioSpectrum-v1.0.0-win64.zip` from the
+1. Download `TaskbarAudioSpectrum-v1.1.0-win64.zip` from the
    [latest release](https://github.com/ShangHTao/TaskbarAudioSpectrum/releases/latest).
 2. Extract the complete archive to a permanent writable directory.
 3. Run `TaskbarAudioSpectrum.exe`.
@@ -119,7 +119,7 @@ Windhawk interface; Windhawk does not read `spectrum.json` or write
 
 | File | Purpose |
 |---|---|
-| `TaskbarAudioSpectrum-v1.0.0-win64.zip` | Complete portable standalone package |
+| `TaskbarAudioSpectrum-v1.1.0-win64.zip` | Complete portable standalone package |
 | `TaskbarAudioSpectrum.exe` | Standalone executable, also included in the ZIP package |
 | `taskbar-audio-spectrum.wh.cpp` | Generated source for manual Windhawk installation |
 | `SHA256SUMS.txt` | SHA-256 checksums for the executable, ZIP, and generated source |
