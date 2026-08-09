@@ -26,6 +26,17 @@ set(parts
   src/windhawk/windhawk_host.cpp
   src/windhawk/tool_process.cpp)
 
+# Shared runtime sources keep the standalone Log() API. Only the generated
+# Windhawk source uses Wh_Log() directly so Windhawk can preserve each call
+# site's line and function information without changing standalone file logs.
+set(windhawk_log_parts
+  src/settings.cpp
+  src/spectrum_analysis.cpp
+  src/audio_capture.cpp
+  src/search_locator.cpp
+  src/overlay_window.cpp
+  src/application.cpp)
+
 set(output "")
 foreach(part IN LISTS parts)
   file(READ "${INPUT_ROOT}/${part}" part_content ENCODING UTF-8)
@@ -60,6 +71,9 @@ foreach(part IN LISTS parts)
            "${line}" MATCHES "^#include[ \\t]")
       continue()
     else()
+      if(part IN_LIST windhawk_log_parts)
+        string(REPLACE "Log(" "Wh_Log(" line "${line}")
+      endif()
       string(APPEND output "${line}\n")
     endif()
   endwhile()

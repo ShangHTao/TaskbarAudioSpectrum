@@ -1,3 +1,4 @@
+#include <taskbar_audio_spectrum/application.h>
 #include <taskbar_audio_spectrum/host.h>
 #include <taskbar_audio_spectrum/json_config.h>
 #include <taskbar_audio_spectrum/settings.h>
@@ -10,6 +11,11 @@
 #include <mutex>
 
 namespace tas {
+
+Runtime& AppRuntime() {
+    static Runtime runtime;
+    return runtime;
+}
 
 namespace {
 
@@ -145,20 +151,29 @@ bool InitializeStandaloneHost(PCWSTR executablePath) {
     state.logPath = directory + L"spectrum.log";
     std::wstring error;
     if (!state.config.LoadFile(state.configPath.c_str(), &error)) {
-        Log(L"Configuration load failed: %ls (%ls); using defaults",
-            state.configPath.c_str(), error.c_str());
-        return GetFileAttributesW(state.configPath.c_str()) ==
-               INVALID_FILE_ATTRIBUTES;
-    } else {
-        Log(L"Configuration loaded: %ls", state.configPath.c_str());
-        std::wstring validationError;
-        if (!ValidateStandaloneConfig(state.config, &validationError)) {
-            Log(L"Configuration schema validation failed: %ls",
-                validationError.c_str());
-            return false;
+        const DWORD attributes = GetFileAttributesW(state.configPath.c_str());
+        const DWORD attributeError = attributes == INVALID_FILE_ATTRIBUTES
+            ? GetLastError()
+            : ERROR_SUCCESS;
+        if (attributeError == ERROR_FILE_NOT_FOUND ||
+            attributeError == ERROR_PATH_NOT_FOUND) {
+            Log(L"Configuration not found: %ls; using defaults",
+                state.configPath.c_str());
+            return true;
         }
-        return true;
+        Log(L"Configuration load failed: %ls (%ls)",
+            state.configPath.c_str(), error.c_str());
+        return false;
     }
+
+    Log(L"Configuration loaded: %ls", state.configPath.c_str());
+    std::wstring validationError;
+    if (!ValidateStandaloneConfig(state.config, &validationError)) {
+        Log(L"Configuration schema validation failed: %ls",
+            validationError.c_str());
+        return false;
+    }
+    return true;
 }
 
 bool ValidateStandaloneConfig(const JsonConfig& config, std::wstring* error) {
@@ -282,7 +297,12 @@ bool HostSyncStartup(bool enabled) {
         const LSTATUS query = RegQueryValueExW(
             key, kValueName, nullptr, &type,
             reinterpret_cast<BYTE*>(existing.data()), &bytes);
+        const bool terminated =
+            bytes >= sizeof(wchar_t) && bytes % sizeof(wchar_t) == 0 &&
+            bytes / sizeof(wchar_t) <= existing.size() &&
+            existing[bytes / sizeof(wchar_t) - 1] == L'\0';
         const bool current = query == ERROR_SUCCESS && type == REG_SZ &&
+                             terminated &&
                              wcscmp(existing.data(), command.c_str()) == 0;
         if (!current) {
             status = RegSetValueExW(

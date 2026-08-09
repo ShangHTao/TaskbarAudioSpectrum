@@ -104,8 +104,7 @@ bool QuerySearchLayout(IUIAutomation* automation, HWND taskbar,
     SearchLayout layout;
     layout.taskbar = taskbar;
     GetWindowThreadProcessId(taskbar, &layout.explorerProcessId);
-    layout.dpi = GetDpiForWindow(taskbar);
-    if (!layout.dpi) layout.dpi = 96;
+    layout.dpi = GetWindowDpiOrDefault(taskbar);
 
     HRESULT hr = E_FAIL;
     if (*cachedSearch) {
@@ -201,7 +200,7 @@ bool BuildLayoutFromTemplate(ApplicationContext& context, HWND taskbar,
         templateDpi = state.templateDpi;
     }
 
-    const UINT dpi = std::max<UINT>(96, GetDpiForWindow(taskbar));
+    const UINT dpi = GetWindowDpiOrDefault(taskbar);
     const auto scale = [&](LONG value) {
         return MulDiv(value, static_cast<int>(dpi),
                       static_cast<int>(templateDpi));
@@ -482,6 +481,34 @@ SearchHostKind DetectSearchHostKind(PCWSTR executablePath) {
     return SearchHostKind::Unknown;
 }
 
+namespace {
+
+SearchHostKind DetectOperatingSystemSearchHostKind() {
+    using RtlGetVersionFunction = LONG(WINAPI*)(OSVERSIONINFOW*);
+    static const SearchHostKind hostKind = [] {
+        const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        const auto rtlGetVersion = ntdll
+            ? reinterpret_cast<RtlGetVersionFunction>(
+                  GetProcAddress(ntdll, "RtlGetVersion"))
+            : nullptr;
+        OSVERSIONINFOW version{};
+        version.dwOSVersionInfoSize = sizeof(version);
+        if (!rtlGetVersion || rtlGetVersion(&version) < 0) {
+            return SearchHostKind::Unknown;
+        }
+        if (version.dwMajorVersion > 10 ||
+            (version.dwMajorVersion == 10 && version.dwBuildNumber >= 22000)) {
+            return SearchHostKind::Windows11;
+        }
+        return version.dwMajorVersion == 10
+            ? SearchHostKind::Windows10
+            : SearchHostKind::Unknown;
+    }();
+    return hostKind;
+}
+
+}  // namespace
+
 bool IsSearchExecutableName(PCWSTR executablePath) {
     return DetectSearchHostKind(executablePath) != SearchHostKind::Unknown;
 }
@@ -492,15 +519,22 @@ bool IsSearchProcessWindow(HWND window) {
     DWORD processId = 0;
     GetWindowThreadProcessId(window, &processId);
     if (!processId) return false;
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                 processId);
+    ScopedHandle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                     processId));
     if (!process) return false;
-    thread_local std::array<wchar_t, 32768> executablePath{};
+    std::array<wchar_t, MAX_PATH> executablePath{};
     DWORD pathLength = static_cast<DWORD>(executablePath.size());
-    const bool queried = QueryFullProcessImageNameW(
-        process, 0, executablePath.data(), &pathLength) != FALSE;
-    CloseHandle(process);
-    return queried && IsSearchExecutableName(executablePath.data());
+    if (QueryFullProcessImageNameW(
+            process.get(), 0, executablePath.data(), &pathLength)) {
+        return IsSearchExecutableName(executablePath.data());
+    }
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return false;
+
+    std::vector<wchar_t> longExecutablePath(32768);
+    pathLength = static_cast<DWORD>(longExecutablePath.size());
+    return QueryFullProcessImageNameW(
+               process.get(), 0, longExecutablePath.data(), &pathLength) &&
+           IsSearchExecutableName(longExecutablePath.data());
 }
 
 bool IsSearchInterfaceOpen() {
@@ -535,8 +569,15 @@ DWORD GetSearchMode() {
     return status == ERROR_SUCCESS ? mode : 0;
 }
 
+bool IsSearchBoxMode(DWORD mode, SearchHostKind hostKind) {
+    if (hostKind == SearchHostKind::Windows10) return mode == 2;
+    if (hostKind == SearchHostKind::Windows11) return mode == 3;
+    // Mode 3 only represents a full search box on current Windows versions.
+    return mode == 3;
+}
+
 bool IsSearchBoxMode(DWORD mode) {
-    return mode == 2 || mode == 3;
+    return IsSearchBoxMode(mode, DetectOperatingSystemSearchHostKind());
 }
 
 int ScaleForDpi(int value, UINT dpi) {
@@ -617,6 +658,14 @@ bool ShouldShowOverlay(const SearchLayout& layout, DWORD searchMode,
 
 DWORD WINAPI SearchLocatorThreadProc(void* parameter) {
     auto& context = *static_cast<ApplicationContext*>(parameter);
+    const HRESULT initializeResult =
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(initializeResult)) {
+        Log(L"Locator supervisor COM initialization failed: 0x%08X",
+            initializeResult);
+        PublishLayout(context, {});
+        return 0;
+    }
     Log(L"UI Automation locator supervisor started");
     while (WaitForSingleObject(context.stopEvent.get(), 0) != WAIT_OBJECT_0) {
         const HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
@@ -690,6 +739,7 @@ DWORD WINAPI SearchLocatorThreadProc(void* parameter) {
 
     PublishLayout(context, {});
     Log(L"UI Automation locator supervisor stopped");
+    CoUninitialize();
     return 0;
 }
 

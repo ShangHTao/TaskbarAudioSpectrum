@@ -1,8 +1,10 @@
 #pragma once
 
+// TAS_WINDHAWK_EXCLUDE_BEGIN
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// TAS_WINDHAWK_EXCLUDE_END
 
 #include <windows.h>
 
@@ -79,6 +81,21 @@ inline void EnablePerMonitorDpiAwarenessForThread() {
         setThreadDpiAwarenessContext(
             reinterpret_cast<HANDLE>(static_cast<LONG_PTR>(-4)));
     }
+}
+
+inline UINT GetWindowDpiOrDefault(HWND window) {
+    using GetDpiForWindowFunction = UINT(WINAPI*)(HWND);
+    static const auto getDpiForWindow = [] {
+        const HMODULE user32 = GetModuleHandleW(L"user32.dll");
+        return user32 ? reinterpret_cast<GetDpiForWindowFunction>(
+                           GetProcAddress(user32, "GetDpiForWindow"))
+                      : nullptr;
+    }();
+    if (getDpiForWindow && window) {
+        const UINT dpi = getDpiForWindow(window);
+        if (dpi) return dpi;
+    }
+    return 96;
 }
 
 }  // namespace tas

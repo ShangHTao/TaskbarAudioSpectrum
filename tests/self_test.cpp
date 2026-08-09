@@ -307,6 +307,28 @@ void TestConfigurationAndPlatform() {
                               &format) - 0.75f) < 0.00001f,
           "64-bit floating-point sample decoding");
 
+    WAVEFORMATEXTENSIBLE extensible{};
+    extensible.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    extensible.Format.nChannels = 1;
+    extensible.Format.wBitsPerSample = 32;
+    extensible.Format.nBlockAlign = 4;
+    extensible.Format.cbSize =
+        sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    extensible.Samples.wValidBitsPerSample = 32;
+    extensible.SubFormat = {
+        WAVE_FORMAT_IEEE_FLOAT, 0x0000, 0x0010,
+        {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+    constexpr float extensibleFloat = 1.0f;
+    Check(std::abs(ReadSample(
+              reinterpret_cast<const BYTE*>(&extensibleFloat), 0, 0,
+              &extensible.Format) - extensibleFloat) < 0.00001f,
+          "extensible floating-point sample decoding");
+    extensible.SubFormat.Data4[0] ^= 1;
+    Check(std::abs(ReadSample(
+              reinterpret_cast<const BYTE*>(&extensibleFloat), 0, 0,
+              &extensible.Format) - extensibleFloat) > 0.1f,
+          "extensible sample subtype requires an exact GUID match");
+
     format.wFormatTag = WAVE_FORMAT_PCM;
     format.nChannels = 1;
     format.wBitsPerSample = 8;
@@ -352,6 +374,8 @@ void TestConfigurationAndPlatform() {
     g_settings.leftPadding = 0;
     Check(CalculateSpectrumBounds(layout, g_settings).left == 0,
           "zero manual offset remains user-defined");
+    Check(GetWindowDpiOrDefault(nullptr) == 96,
+          "DPI compatibility helper has a stable fallback");
     Check(RectEquals({1, 2, 3, 4}, {1, 2, 3, 4}) &&
               !RectEquals({1, 2, 3, 4}, {1, 2, 3, 5}),
           "layout rectangle equality");
@@ -369,9 +393,15 @@ void TestConfigurationAndPlatform() {
               DetectSearchHostKind(L"explorer.exe") ==
               SearchHostKind::Unknown,
           "Windows 10 and Windows 11 search hosts are distinguished");
-    Check(!IsSearchBoxMode(0) && !IsSearchBoxMode(1) &&
-              IsSearchBoxMode(2) && IsSearchBoxMode(3),
-          "Windows 10 and Windows 11 search-box modes");
+    Check(!IsSearchBoxMode(0, SearchHostKind::Windows10) &&
+              !IsSearchBoxMode(1, SearchHostKind::Windows10) &&
+              IsSearchBoxMode(2, SearchHostKind::Windows10) &&
+              !IsSearchBoxMode(3, SearchHostKind::Windows10) &&
+              !IsSearchBoxMode(2, SearchHostKind::Windows11) &&
+              IsSearchBoxMode(3, SearchHostKind::Windows11) &&
+              !IsSearchBoxMode(2, SearchHostKind::Unknown) &&
+              IsSearchBoxMode(3, SearchHostKind::Unknown),
+          "search-box mode respects the Windows search host generation");
 }
 
 void TestSpectrumAnalysis() {
@@ -713,14 +743,6 @@ void TestSpectrumAnalysis() {
                     &analysisScratch, &g_bands);
     Check(g_bands[testBand] > 0.35f,
           "opposite-phase stereo channels retain spectral power");
-
-    const float beforeSilence =
-        g_bands[testBand];
-    PublishSilence(plan, &g_bands);
-    const float afterSilence =
-        g_bands[testBand];
-    Check(afterSilence >= 0.0f && afterSilence < beforeSilence,
-          "silent-block decay");
 }
 
 void TestRenderingAndNotifications() {

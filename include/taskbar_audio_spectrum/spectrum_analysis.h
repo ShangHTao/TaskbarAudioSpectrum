@@ -8,14 +8,12 @@ namespace tas {
 
 struct AnalysisPlan {
     int bars = 0;
-    int sampleRate = 0;
     int fftSize = 0;
     int fftBins = 0;
     int hopSamples = 0;
     float sensitivity = 1.0f;
     float binWidth = 0.0f;
     double windowSumSquares = 0.0;
-    float releaseRetention = 0.0f;
     float minimumDecibels = -72.0f;
     float maximumDecibels = -6.0f;
     BandAggregation bandAggregation = BandAggregation::Energy;
@@ -47,9 +45,6 @@ void Analyze(const std::vector<float>& samples, const AnalysisPlan& plan,
 void AnalyzeChannels(const std::vector<std::vector<float>>& channels,
                      size_t oldestSample, const AnalysisPlan& plan,
                      AnalysisScratch* scratch, BandLevels* levels);
-// TAS_WINDHAWK_EXCLUDE_BEGIN
-void PublishSilence(const AnalysisPlan& plan, BandLevels* levels);
-// TAS_WINDHAWK_EXCLUDE_END
 void ClearBands(BandLevels* levels);
 float SmoothDisplayLevel(float current, float target, float deltaSeconds,
                          int attackMs, int releaseMs);

@@ -37,15 +37,6 @@ bool WaitForThread(HANDLE thread, DWORD timeout, PCWSTR name) {
 
 }  // namespace
 
-Runtime& AppRuntime() {
-#ifdef TAS_WINDHAWK_HOST
-    [[clang::no_destroy]] static Runtime runtime;
-#else
-    static Runtime runtime;
-#endif
-    return runtime;
-}
-
 Runtime::Runtime() = default;
 
 Runtime::~Runtime() {
@@ -85,7 +76,7 @@ bool Runtime::Start(const Settings& settings) {
     locatorThread_.reset(CreateThread(
         nullptr, 0, SearchLocatorThreadProc, context_.get(), 0, nullptr));
     overlayThread_.reset(CreateThread(
-        nullptr, 0, OverlayThreadProc, context_.get(), 0, &overlayThreadId_));
+        nullptr, 0, OverlayThreadProc, context_.get(), 0, nullptr));
     audioThread_.reset(CreateThread(
         nullptr, 0, AudioThreadProc, context_.get(), 0, nullptr));
     if (!locatorThread_ || !overlayThread_ || !audioThread_) {
@@ -104,7 +95,6 @@ bool Runtime::Stop() {
     if (context_->activityChangedEvent) {
         SetEvent(context_->activityChangedEvent.get());
     }
-    if (overlayThreadId_) PostThreadMessageW(overlayThreadId_, WM_QUIT, 0, 0);
 
     const bool locatorStopped =
         WaitForThread(locatorThread_.get(), 5500, L"Locator");
@@ -119,7 +109,6 @@ bool Runtime::Stop() {
         locatorThread_.reset();
         overlayThread_.reset();
         audioThread_.reset();
-        overlayThreadId_ = 0;
         context_.release();
         return false;
     }
@@ -127,7 +116,6 @@ bool Runtime::Stop() {
     locatorThread_.reset();
     overlayThread_.reset();
     audioThread_.reset();
-    overlayThreadId_ = 0;
     ClearPublishedBands(*context_);
     context_.reset();
     Log(L"Runtime stopped cleanly");

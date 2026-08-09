@@ -1,5 +1,14 @@
 #include <taskbar_audio_spectrum/spectrum_analysis.h>
+
 namespace tas {
+
+namespace {
+
+constexpr GUID kIeeeFloatSubformat = {
+    WAVE_FORMAT_IEEE_FLOAT, 0x0000, 0x0010,
+    {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+
+}  // namespace
 
 void ClearBands(BandLevels* levels) {
     if (levels) levels->fill(0.0f);
@@ -20,7 +29,7 @@ float ReadSample(const BYTE* data, UINT32 frame, int channel,
         format->cbSize >= sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)) {
         const auto* extensible =
             reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(format);
-        isFloat = extensible->SubFormat.Data1 == WAVE_FORMAT_IEEE_FLOAT;
+        isFloat = IsEqualGUID(extensible->SubFormat, kIeeeFloatSubformat);
     }
     if (isFloat && bits == 32) {
         float value;
@@ -258,7 +267,6 @@ AnalysisPlan MakeAnalysisPlan(int sampleRate, const Settings& settings) {
     if (sampleRate <= 0) return plan;
     plan.bars = std::clamp(settings.barCount, 1, kMaxBars);
     plan.binWeights.resize(kMaxBars);
-    plan.sampleRate = sampleRate;
     plan.fftSize = IsSupportedFftSize(settings.fftSize)
         ? settings.fftSize : kDefaultFftSamples;
     plan.fftBins = plan.fftSize / 2 + 1;
@@ -283,10 +291,6 @@ AnalysisPlan MakeAnalysisPlan(int sampleRate, const Settings& settings) {
         plan.window[index] = value;
         plan.windowSumSquares += static_cast<double>(value) * value;
     }
-    const float hopSeconds = plan.hopSamples / static_cast<float>(sampleRate);
-    plan.releaseRetention = settings.releaseMs <= 0 ? 0.0f :
-        std::exp(-hopSeconds / (settings.releaseMs / 1000.0f));
-
     if (settings.frequencyScale == FrequencyScale::ThirdOctaveNominal) {
         const int firstIndex = static_cast<int>(std::lround(
             3.0 * std::log2(settings.minimumCenterFrequency /
@@ -424,15 +428,6 @@ void AnalyzeChannels(const std::vector<std::vector<float>>& channels,
     }
     PublishBandPower(scratch->spectrumPower, channels.size(), plan, levels);
 }
-
-// TAS_WINDHAWK_EXCLUDE_BEGIN
-void PublishSilence(const AnalysisPlan& plan, BandLevels* levels) {
-    if (!levels) return;
-    for (int band = 0; band < plan.bars; ++band) {
-        (*levels)[band] *= plan.releaseRetention;
-    }
-}
-// TAS_WINDHAWK_EXCLUDE_END
 
 float SmoothDisplayLevel(float current, float target, float deltaSeconds,
                          int attackMs, int releaseMs) {

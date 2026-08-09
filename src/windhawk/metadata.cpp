@@ -98,7 +98,7 @@ Source, standalone downloads, and detailed documentation are available on the
   $description: Analysis window size; supported values are 4096, 8192, and 16384.
 - overlapPercent: 75
   $name: FFT overlap (percent)
-  $description: Overlap between consecutive analysis windows.
+  $description: Overlap between consecutive analysis windows. Higher values update the analysis more often and use more CPU.
 - windowFunction: "hann"
   $name: FFT window
   $description: Window function applied before each FFT.

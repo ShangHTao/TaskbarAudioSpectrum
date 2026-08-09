@@ -48,20 +48,24 @@ struct WindowState {
 };
 
 thread_local HWND g_shellStateTargetWindow = nullptr;
+thread_local HWND g_foregroundRootWindow = nullptr;
 
 void CALLBACK ShellStateWinEventProc(HWINEVENTHOOK, DWORD event,
                                      HWND eventWindow, LONG objectId,
                                      LONG childId, DWORD, DWORD) {
     if (!g_shellStateTargetWindow) return;
+    if (event == EVENT_SYSTEM_FOREGROUND) {
+        g_foregroundRootWindow = eventWindow
+            ? GetAncestor(eventWindow, GA_ROOT)
+            : nullptr;
+    }
     if (event == EVENT_OBJECT_LOCATIONCHANGE) {
         if (!eventWindow || objectId != OBJID_WINDOW ||
             childId != CHILDID_SELF) {
             return;
         }
-        const HWND foreground = GetForegroundWindow();
-        if (!foreground ||
-            GetAncestor(eventWindow, GA_ROOT) !=
-                GetAncestor(foreground, GA_ROOT)) {
+        if (!g_foregroundRootWindow ||
+            GetAncestor(eventWindow, GA_ROOT) != g_foregroundRootWindow) {
             return;
         }
     }
@@ -274,8 +278,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
     const bool silenceDelayElapsed = !audible &&
         frameTick - state->lastAudibleTick >=
             static_cast<ULONGLONG>(settings.silenceHideDelayMs);
-    if (settings.opacity == 0 ||
-        (settings.hideWhenSilent && silenceDelayElapsed)) {
+    if (settings.hideWhenSilent && silenceDelayElapsed) {
         HideOverlay(window, state, false);
         return;
     }
@@ -397,7 +400,6 @@ void DrawSpectrum(HWND window, WindowState* state) {
     POINT source{};
     BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
     if (state->visible && state->presentedPixels == state->framePixels) {
-        EnsureAboveTaskbar(window, state);
         return;
     }
     memcpy(state->pixels, state->framePixels.data(),
@@ -421,14 +423,19 @@ void DrawSpectrum(HWND window, WindowState* state) {
                          SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
         state->visible = true;
         SetVisualizerActive(context, true);
+        EnsureAboveTaskbar(window, state);
     }
-    EnsureAboveTaskbar(window, state);
 }
 
 void RefreshOverlayState(HWND window, WindowState* state,
                          bool refreshSearchMode,
                          bool refreshSearchInterface) {
     if (!state) return;
+    if (state->context->settings.opacity == 0) {
+        state->eligible = false;
+        HideOverlay(window, state);
+        return;
+    }
     if (refreshSearchMode) {
         state->searchMode = GetSearchMode();
     }
@@ -475,17 +482,27 @@ void RefreshOverlayState(HWND window, WindowState* state,
     if (changed) {
         const RECT spectrumBounds = CalculateSpectrumBounds(
             latest, state->context->settings);
-        Log(previousExplorer != latest.explorerProcessId
-                ? L"Search box attached: explorer=%lu left=%ld top=%ld width=%ld height=%ld insets=%d/%d/%d/%d dpi=%u"
-                : L"Spectrum layout updated: explorer=%lu left=%ld top=%ld width=%ld height=%ld insets=%d/%d/%d/%d dpi=%u",
-            latest.explorerProcessId, latest.rect.left,
-            latest.rect.top, latest.rect.right - latest.rect.left,
-            latest.rect.bottom - latest.rect.top,
-            spectrumBounds.left,
-            latest.rect.right - latest.rect.left - spectrumBounds.right,
-            spectrumBounds.top,
-            latest.rect.bottom - latest.rect.top - spectrumBounds.bottom,
-            latest.dpi);
+        if (previousExplorer != latest.explorerProcessId) {
+            Log(L"Search box attached: explorer=%lu left=%ld top=%ld width=%ld height=%ld insets=%d/%d/%d/%d dpi=%u",
+                latest.explorerProcessId, latest.rect.left,
+                latest.rect.top, latest.rect.right - latest.rect.left,
+                latest.rect.bottom - latest.rect.top,
+                spectrumBounds.left,
+                latest.rect.right - latest.rect.left - spectrumBounds.right,
+                spectrumBounds.top,
+                latest.rect.bottom - latest.rect.top - spectrumBounds.bottom,
+                latest.dpi);
+        } else {
+            Log(L"Spectrum layout updated: explorer=%lu left=%ld top=%ld width=%ld height=%ld insets=%d/%d/%d/%d dpi=%u",
+                latest.explorerProcessId, latest.rect.left,
+                latest.rect.top, latest.rect.right - latest.rect.left,
+                latest.rect.bottom - latest.rect.top,
+                spectrumBounds.left,
+                latest.rect.right - latest.rect.left - spectrumBounds.right,
+                spectrumBounds.top,
+                latest.rect.bottom - latest.rect.top - spectrumBounds.bottom,
+                latest.dpi);
+        }
     }
 }
 
@@ -545,11 +562,19 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
     windowClass.lpfnWndProc = OverlayWindowProc;
-    windowClass.hInstance = GetModuleHandleW(nullptr);
+    HMODULE currentModule = nullptr;
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<PCWSTR>(&OverlayThreadProc), &currentModule)) {
+        Log(L"Failed to resolve overlay module: %u", GetLastError());
+        return 0;
+    }
+    windowClass.hInstance = currentModule;
     windowClass.lpszClassName = kOverlayWindowClass;
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     const bool registeredWindowClass = RegisterClassExW(&windowClass) != 0;
-    if (!registeredWindowClass && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+    if (!registeredWindowClass) {
         Log(L"Failed to register overlay class: %u", GetLastError());
         return 0;
     }
@@ -596,6 +621,10 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
             break;
         }
         g_shellStateTargetWindow = window;
+        const HWND foreground = GetForegroundWindow();
+        g_foregroundRootWindow = foreground
+            ? GetAncestor(foreground, GA_ROOT)
+            : nullptr;
         constexpr DWORD eventHookFlags =
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
         const HWINEVENTHOOK foregroundHook = SetWinEventHook(
@@ -607,9 +636,11 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         if (!foregroundHook || !locationHook) {
             Log(L"Foreground event watcher incomplete: %u", GetLastError());
         }
-        Log(rendererStarted
-                ? L"Spectrum renderer recreated after taskbar replacement"
-                : L"Spectrum renderer started as an owned top-level overlay");
+        if (rendererStarted) {
+            Log(L"Spectrum renderer recreated after taskbar replacement");
+        } else {
+            Log(L"Spectrum renderer started as an owned top-level overlay");
+        }
         rendererStarted = true;
 
         RefreshOverlayState(window, &state, true, true);
@@ -664,6 +695,7 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
             }
         }
         g_shellStateTargetWindow = nullptr;
+        g_foregroundRootWindow = nullptr;
         if (foregroundHook) UnhookWinEvent(foregroundHook);
         if (locationHook) UnhookWinEvent(locationHook);
         KillTimer(window, kFrameTimer);

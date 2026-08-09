@@ -22,7 +22,6 @@ private:
     ScopedHandle audioThread_;
     ScopedHandle locatorThread_;
     ScopedHandle overlayThread_;
-    DWORD overlayThreadId_ = 0;
     std::unique_ptr<ApplicationContext> context_;
 };
 

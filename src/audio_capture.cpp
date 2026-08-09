@@ -62,7 +62,6 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
     auto& context = *static_cast<ApplicationContext*>(parameter);
     const Settings& settings = context.settings;
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool uninitialize = SUCCEEDED(hr);
     if (FAILED(hr)) {
         Log(L"Audio COM initialization failed: 0x%08X", hr);
         return 0;
@@ -270,12 +269,15 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
                             AnalyzeChannels(samples, writeIndex, plan,
                                             &analysisScratch, &levels);
                             PublishBandLevels(context, levels);
-                            const float strongest = *std::max_element(
-                                levels.begin(), levels.begin() + plan.bars);
-                            if (strongest > 0.03f && !signalSeen) {
-                                Log(L"Audio signal detected, peak band level %.3f",
-                                    strongest);
-                                signalSeen = true;
+                            if (plan.bars > 0) {
+                                const float strongest = *std::max_element(
+                                    levels.begin(),
+                                    levels.begin() + plan.bars);
+                                if (strongest > 0.03f && !signalSeen) {
+                                    Log(L"Audio signal detected, peak band level %.3f",
+                                        strongest);
+                                    signalSeen = true;
+                                }
                             }
                             framesSinceAnalysis = 0;
                         }
@@ -324,7 +326,7 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
 
 finished:
     ClearPublishedBands(context);
-    if (uninitialize) CoUninitialize();
+    CoUninitialize();
     return 0;
 }
 

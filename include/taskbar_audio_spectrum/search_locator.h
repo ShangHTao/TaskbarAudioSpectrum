@@ -3,6 +3,7 @@
 #include "settings.h"
 
 namespace tas {
+enum class SearchHostKind { Unknown, Windows10, Windows11 };
 struct SearchLayout {
     HWND taskbar = nullptr;
     DWORD explorerProcessId = 0;
@@ -11,8 +12,8 @@ struct SearchLayout {
     uint64_t generation = 0;
     bool valid = false;
 };
-enum class SearchHostKind { Unknown, Windows10, Windows11 };
 DWORD GetSearchMode();
+bool IsSearchBoxMode(DWORD mode, SearchHostKind hostKind);
 bool IsSearchBoxMode(DWORD mode);
 int ScaleForDpi(int value, UINT dpi);
 RECT CalculateSpectrumBounds(const SearchLayout& layout,

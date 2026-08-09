@@ -16,15 +16,13 @@
 #include <atomic>
 #include <cmath>
 #include <complex>
-#include <cstdarg>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
