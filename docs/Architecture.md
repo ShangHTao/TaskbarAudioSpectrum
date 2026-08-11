@@ -77,7 +77,9 @@ when an API or window value is unavailable.
 The renderer creates an owned, layered, topmost, click-through window from the
 current module. It reads the latest layout and published bands, performs
 elapsed-time attack/release smoothing and peak animation, and draws a
-low-to-high frequency gradient into a 32-bit DIB.
+low-to-high frequency gradient into a 32-bit DIB. Every runtime uses a distinct
+window class, so an abandoned thread from a timed-out shutdown cannot block a
+fresh renderer from starting.
 
 Registry notifications and foreground/location WinEvents maintain cached
 visibility state. Location events are scoped to the foreground process and

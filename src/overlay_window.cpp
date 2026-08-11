@@ -9,6 +9,11 @@
 
 namespace tas {
 
+std::wstring MakeOverlayWindowClassName(unsigned serial) {
+    return std::wstring(kOverlayWindowClass) + L"_" +
+           std::to_wstring(serial);
+}
+
 namespace {
 
 constexpr UINT_PTR kFrameTimer = 1;
@@ -61,6 +66,7 @@ struct WindowState {
 thread_local HWND g_shellStateTargetWindow = nullptr;
 thread_local HWND g_foregroundRootWindow = nullptr;
 thread_local UINT g_pendingShellStateChanges = 0;
+std::atomic<unsigned> g_overlayClassSerial{0};
 
 void CALLBACK ShellStateWinEventProc(HWINEVENTHOOK, DWORD event,
                                      HWND eventWindow, LONG objectId,
@@ -128,7 +134,8 @@ void UpdateForegroundLocationHook(WindowState* state) {
 }
 
 bool StartFrameTimer(HWND window, WindowState* state) {
-    if (!state || state->frameTimerActive) return state != nullptr;
+    if (!state) return false;
+    if (state->frameTimerActive) return true;
     if (!SetTimer(window, kFrameTimer, state->frameInterval, nullptr)) {
         if (!state->frameTimerErrorLogged) {
             Log(L"Failed to start spectrum frame timer: %u", GetLastError());
@@ -325,7 +332,7 @@ bool NeedsFrameUpdates(const WindowState* state) {
     for (int index = 0; index < state->context->settings.barCount; ++index) {
         const PeakState& peak = state->peaks[index];
         if (state->displayed[index] != 0.0f || peak.level != 0.0f ||
-            peak.velocity != 0.0f || peak.holdSeconds != 0.0f) {
+            peak.velocity != 0.0f) {
             return true;
         }
     }
@@ -672,6 +679,8 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message,
 DWORD WINAPI OverlayThreadProc(void* parameter) {
     auto& context = *static_cast<ApplicationContext*>(parameter);
     EnablePerMonitorDpiAwarenessForThread();
+    const std::wstring overlayClassName = MakeOverlayWindowClassName(
+        g_overlayClassSerial.fetch_add(1, std::memory_order_relaxed) + 1);
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
     windowClass.lpfnWndProc = OverlayWindowProc;
@@ -684,7 +693,7 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         return 0;
     }
     windowClass.hInstance = currentModule;
-    windowClass.lpszClassName = kOverlayWindowClass;
+    windowClass.lpszClassName = overlayClassName.c_str();
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     const bool registeredWindowClass = RegisterClassExW(&windowClass) != 0;
     if (!registeredWindowClass) {
@@ -720,7 +729,7 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         HWND window = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW |
                 WS_EX_NOACTIVATE,
-            kOverlayWindowClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr,
+            windowClass.lpszClassName, L"", WS_POPUP, 0, 0, 0, 0, nullptr,
             nullptr, windowClass.hInstance, &state);
         if (!window) {
             Log(L"Failed to create overlay window: %u", GetLastError());
@@ -831,7 +840,7 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         Log(L"Overlay owner was replaced; recreating renderer");
     }
     if (registeredWindowClass) {
-        UnregisterClassW(kOverlayWindowClass, windowClass.hInstance);
+        UnregisterClassW(windowClass.lpszClassName, windowClass.hInstance);
     }
     Log(L"Spectrum renderer stopped");
     return 0;

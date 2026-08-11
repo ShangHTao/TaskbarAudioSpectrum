@@ -493,7 +493,7 @@ void UpdatePeak(PeakState* peak, float level, float deltaSeconds,
     if (level >= peak->level) {
         peak->level = level;
         peak->velocity = 0.0f;
-        peak->holdSeconds = holdSeconds;
+        peak->holdSeconds = level > 0.0f ? holdSeconds : 0.0f;
         return;
     }
     float fallingTime = deltaSeconds;
@@ -508,6 +508,7 @@ void UpdatePeak(PeakState* peak, float level, float deltaSeconds,
     if (peak->level <= level) {
         peak->level = level;
         peak->velocity = 0.0f;
+        peak->holdSeconds = 0.0f;
     }
 }
 

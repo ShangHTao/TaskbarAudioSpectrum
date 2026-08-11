@@ -2,6 +2,7 @@
 #include <taskbar_audio_spectrum/audio_capture.h>
 #include <taskbar_audio_spectrum/host.h>
 #include <taskbar_audio_spectrum/json_config.h>
+#include <taskbar_audio_spectrum/overlay_window.h>
 #include <taskbar_audio_spectrum/search_locator.h>
 #include <taskbar_audio_spectrum/standalone_host.h>
 #include <taskbar_audio_spectrum/spectrum_analysis.h>
@@ -49,10 +50,6 @@ void TestConfigurationAndPlatform() {
               defaults.leftPadding == 66,
           "professional default spectrum profile");
 
-    Check(ParseColor(L"#1234AB", RGB(0, 0, 0)) == RGB(0x12, 0x34, 0xAB),
-          "valid RGB color parsing");
-    Check(ParseColor(L"invalid", RGB(1, 2, 3)) == RGB(1, 2, 3),
-          "invalid RGB color fallback");
     COLORREF parsedColor = 0;
     Check(TryParseColor(L"#ABCDEF", &parsedColor) &&
               parsedColor == RGB(0xAB, 0xCD, 0xEF) &&
@@ -824,6 +821,11 @@ void TestRenderingAndNotifications() {
           "peak blocks remain continuously visible when their own band reaches zero");
 
     PeakState peak;
+    PeakState silentPeak;
+    UpdatePeak(&silentPeak, 0.0f, 1.0f / 30.0f, 0.16f, 3.2f);
+    Check(silentPeak.level == 0.0f && silentPeak.velocity == 0.0f &&
+              silentPeak.holdSeconds == 0.0f,
+          "silent peak remains fully settled for renderer idle");
     UpdatePeak(&peak, 0.8f, 1.0f / 30.0f, 0.16f, 3.2f);
     for (int frame = 0; frame < 4; ++frame) {
         UpdatePeak(&peak, 0.0f, 1.0f / 30.0f, 0.16f, 3.2f);
@@ -838,7 +840,8 @@ void TestRenderingAndNotifications() {
     for (int frame = 0; frame < 120; ++frame) {
         UpdatePeak(&peak, 0.0f, 1.0f / 30.0f, 0.16f, 3.2f);
     }
-    Check(peak.level == 0.0f,
+    Check(peak.level == 0.0f && peak.velocity == 0.0f &&
+              peak.holdSeconds == 0.0f,
           "peak block settles at the current spectrum level");
 
     ScopedHandle event(CreateEventW(nullptr, FALSE, FALSE, nullptr));
@@ -856,8 +859,28 @@ void TestRenderingAndNotifications() {
           "default console render change requests reconnect");
     notification->Release();
 
-    Check(wcsstr(kOverlayWindowClass, L"Windhawk") == nullptr,
-          "overlay class has no legacy host coupling");
+    const std::wstring firstOverlayClass = MakeOverlayWindowClassName(1);
+    const std::wstring secondOverlayClass = MakeOverlayWindowClassName(2);
+    Check(firstOverlayClass == L"TaskbarAudioSpectrumOverlay_1" &&
+              secondOverlayClass == L"TaskbarAudioSpectrumOverlay_2" &&
+              firstOverlayClass != secondOverlayClass,
+          "each runtime receives an independent overlay window class");
+    WNDCLASSEXW overlayClass{};
+    overlayClass.cbSize = sizeof(overlayClass);
+    overlayClass.lpfnWndProc = DefWindowProcW;
+    overlayClass.hInstance = GetModuleHandleW(nullptr);
+    overlayClass.lpszClassName = firstOverlayClass.c_str();
+    const ATOM firstClass = RegisterClassExW(&overlayClass);
+    overlayClass.lpszClassName = secondOverlayClass.c_str();
+    const ATOM secondClass = RegisterClassExW(&overlayClass);
+    Check(firstClass && secondClass,
+          "independent overlay window classes can coexist during recovery");
+    if (secondClass) {
+        UnregisterClassW(secondOverlayClass.c_str(), overlayClass.hInstance);
+    }
+    if (firstClass) {
+        UnregisterClassW(firstOverlayClass.c_str(), overlayClass.hInstance);
+    }
 }
 
 int main() {

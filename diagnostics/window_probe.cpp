@@ -26,11 +26,24 @@ bool IsWindowAbove(HWND first, HWND second) {
     return false;
 }
 
+bool IsOverlayWindow(HWND window) {
+    wchar_t className[256]{};
+    if (!GetClassNameW(window, className, ARRAYSIZE(className))) return false;
+    const size_t baseLength = wcslen(tas::kOverlayWindowClass);
+    return wcsncmp(className, tas::kOverlayWindowClass, baseLength) == 0 &&
+           (className[baseLength] == L'\0' ||
+            className[baseLength] == L'_');
+}
+
+BOOL CALLBACK FindOverlayProc(HWND window, LPARAM parameter) {
+    if (!IsOverlayWindow(window)) return TRUE;
+    *reinterpret_cast<HWND*>(parameter) = window;
+    return FALSE;
+}
+
 BOOL CALLBACK EnumProc(HWND window, LPARAM parameter) {
     auto* state = reinterpret_cast<ProbeState*>(parameter);
-    wchar_t className[256]{};
-    GetClassNameW(window, className, ARRAYSIZE(className));
-    if (wcscmp(className, L"TaskbarAudioSpectrumOverlay") != 0) return TRUE;
+    if (!IsOverlayWindow(window)) return TRUE;
 
     ++state->overlayCount;
     DWORD processId = 0;
@@ -112,8 +125,8 @@ int wmain(int argumentCount, wchar_t** arguments) {
     }
 
     if (reclaimTaskbar) {
-        const HWND overlay =
-            FindWindowW(L"TaskbarAudioSpectrumOverlay", nullptr);
+        HWND overlay = nullptr;
+        EnumWindows(FindOverlayProc, reinterpret_cast<LPARAM>(&overlay));
         if (!overlay) {
             std::wcerr << L"Overlay window was not found for z-order test.\n";
             return 3;

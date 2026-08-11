@@ -265,12 +265,6 @@ bool TryParseColor(PCWSTR text, COLORREF* color) {
     return true;
 }
 
-COLORREF ParseColor(PCWSTR text, COLORREF fallback) {
-    COLORREF color = fallback;
-    TryParseColor(text, &color);
-    return color;
-}
-
 // TAS_WINDHAWK_EXCLUDE_BEGIN
 std::wstring StartupCommandForExecutable(PCWSTR executablePath) {
     if (!executablePath || !*executablePath) return {};

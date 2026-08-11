@@ -72,7 +72,6 @@ bool InstanceTakeoverSucceeded(DWORD waitResult);
 std::wstring StartupCommandForExecutable(PCWSTR executablePath);
 // TAS_WINDHAWK_EXCLUDE_END
 bool TryParseColor(PCWSTR text, COLORREF* color);
-COLORREF ParseColor(PCWSTR text, COLORREF fallback);
 Settings LoadSettings();
 
 }  // namespace tas
