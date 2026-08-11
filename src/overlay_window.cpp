@@ -13,8 +13,14 @@ namespace {
 
 constexpr UINT_PTR kFrameTimer = 1;
 constexpr UINT_PTR kStateSafetyTimer = 2;
+constexpr UINT_PTR kShellStateDebounceTimer = 3;
 constexpr UINT kShellStateChangedMessage = WM_APP + 1;
 constexpr UINT kStateSafetyRefreshMs = 30000;
+constexpr UINT kShellStateDebounceMs = 200;
+constexpr UINT kPendingForegroundChange = 1 << 0;
+constexpr UINT kPendingLocationChange = 1 << 1;
+constexpr DWORD kEventHookFlags =
+    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
 
 struct WindowState {
     ApplicationContext* context = nullptr;
@@ -35,7 +41,9 @@ struct WindowState {
     // TAS_WINDHAWK_EXCLUDE_END
     ULONGLONG lastFrameTick = 0;
     ULONGLONG lastAudibleTick = 0;
+    UINT frameInterval = 0;
     HWND ownerTaskbar = nullptr;
+    HWINEVENTHOOK locationHook = nullptr;
     DWORD searchMode = 0;
     bool searchInterfaceOpen = false;
     bool searchInterfaceWasOpen = false;
@@ -43,23 +51,28 @@ struct WindowState {
     bool positioned = false;
     bool eligible = false;
     bool visible = false;
+    bool frameTimerActive = false;
+    bool frameTimerErrorLogged = false;
+    bool locationHookErrorLogged = false;
     bool updateErrorLogged = false;
     bool zOrderErrorLogged = false;
 };
 
 thread_local HWND g_shellStateTargetWindow = nullptr;
 thread_local HWND g_foregroundRootWindow = nullptr;
+thread_local UINT g_pendingShellStateChanges = 0;
 
 void CALLBACK ShellStateWinEventProc(HWINEVENTHOOK, DWORD event,
                                      HWND eventWindow, LONG objectId,
                                      LONG childId, DWORD, DWORD) {
     if (!g_shellStateTargetWindow) return;
+    UINT pendingChange = 0;
     if (event == EVENT_SYSTEM_FOREGROUND) {
         g_foregroundRootWindow = eventWindow
             ? GetAncestor(eventWindow, GA_ROOT)
             : nullptr;
-    }
-    if (event == EVENT_OBJECT_LOCATIONCHANGE) {
+        pendingChange = kPendingForegroundChange;
+    } else if (event == EVENT_OBJECT_LOCATIONCHANGE) {
         if (!eventWindow || objectId != OBJID_WINDOW ||
             childId != CHILDID_SELF) {
             return;
@@ -68,9 +81,72 @@ void CALLBACK ShellStateWinEventProc(HWINEVENTHOOK, DWORD event,
             GetAncestor(eventWindow, GA_ROOT) != g_foregroundRootWindow) {
             return;
         }
+        pendingChange = kPendingLocationChange;
+    } else {
+        return;
     }
-    PostMessageW(g_shellStateTargetWindow, kShellStateChangedMessage,
-                 event, 0);
+
+    const UINT previousChanges = g_pendingShellStateChanges;
+    g_pendingShellStateChanges |= pendingChange;
+    if (!previousChanges &&
+        !PostMessageW(g_shellStateTargetWindow,
+                      kShellStateChangedMessage, 0, 0)) {
+        g_pendingShellStateChanges = 0;
+    }
+}
+
+void UpdateForegroundLocationHook(WindowState* state) {
+    if (!state) return;
+    if (state->locationHook) {
+        UnhookWinEvent(state->locationHook);
+        state->locationHook = nullptr;
+    }
+
+    DWORD foregroundProcessId = 0;
+    if (g_foregroundRootWindow && IsWindow(g_foregroundRootWindow)) {
+        GetWindowThreadProcessId(g_foregroundRootWindow,
+                                 &foregroundProcessId);
+    }
+    if (!foregroundProcessId) {
+        state->locationHookErrorLogged = false;
+        return;
+    }
+
+    state->locationHook = SetWinEventHook(
+        EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+        nullptr, ShellStateWinEventProc, foregroundProcessId, 0,
+        kEventHookFlags);
+    if (!state->locationHook) {
+        if (!state->locationHookErrorLogged) {
+            Log(L"Failed to watch foreground-window geometry: %u",
+                GetLastError());
+            state->locationHookErrorLogged = true;
+        }
+        return;
+    }
+    state->locationHookErrorLogged = false;
+}
+
+bool StartFrameTimer(HWND window, WindowState* state) {
+    if (!state || state->frameTimerActive) return state != nullptr;
+    if (!SetTimer(window, kFrameTimer, state->frameInterval, nullptr)) {
+        if (!state->frameTimerErrorLogged) {
+            Log(L"Failed to start spectrum frame timer: %u", GetLastError());
+            state->frameTimerErrorLogged = true;
+        }
+        return false;
+    }
+    state->frameTimerActive = true;
+    state->frameTimerErrorLogged = false;
+    state->lastFrameTick = 0;
+    return true;
+}
+
+void StopFrameTimer(HWND window, WindowState* state) {
+    if (!state || !state->frameTimerActive) return;
+    KillTimer(window, kFrameTimer);
+    state->frameTimerActive = false;
+    state->lastFrameTick = 0;
 }
 
 bool IsWindowAbove(HWND first, HWND second) {
@@ -142,7 +218,10 @@ bool EnsureTaskbarOwner(HWND window, WindowState* state,
 
 void HideOverlay(HWND window, WindowState* state, bool deactivate = true) {
     if (!state) return;
-    if (deactivate) SetVisualizerActive(*state->context, false);
+    if (deactivate) {
+        StopFrameTimer(window, state);
+        SetVisualizerActive(*state->context, false);
+    }
     state->peaks = {};
     if (deactivate) state->displayed = {};
     state->lastFrameTick = 0;
@@ -237,12 +316,28 @@ bool EnsureSurface(WindowState* state, int width, int height) {
     return true;
 }
 
-void DrawSpectrum(HWND window, WindowState* state) {
+bool NeedsFrameUpdates(const WindowState* state) {
+    if (!state) return false;
+    if (state->context->publishedSignalActive.load(
+            std::memory_order_acquire)) {
+        return true;
+    }
+    for (int index = 0; index < state->context->settings.barCount; ++index) {
+        const PeakState& peak = state->peaks[index];
+        if (state->displayed[index] != 0.0f || peak.level != 0.0f ||
+            peak.velocity != 0.0f || peak.holdSeconds != 0.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool DrawSpectrum(HWND window, WindowState* state) {
     ApplicationContext& context = *state->context;
     const Settings& settings = context.settings;
     const int width = state->layout.rect.right - state->layout.rect.left;
     const int height = state->layout.rect.bottom - state->layout.rect.top;
-    if (width <= 0 || height <= 0) return;
+    if (width <= 0 || height <= 0) return false;
 
     const int bars = settings.barCount;
     const ULONGLONG frameTick = GetTickCount64();
@@ -280,7 +375,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
             static_cast<ULONGLONG>(settings.silenceHideDelayMs);
     if (settings.hideWhenSilent && silenceDelayElapsed) {
         HideOverlay(window, state, false);
-        return;
+        return NeedsFrameUpdates(state);
     }
 
     const RECT spectrumBounds =
@@ -293,7 +388,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
     const int maximumHeight = spectrumBottom - spectrumTop;
     if (usableWidth <= 0 || maximumHeight <= 0) {
         HideOverlay(window, state, false);
-        return;
+        return false;
     }
     if (!EnsureSurface(state, width, height)) {
         if (!state->updateErrorLogged) {
@@ -301,7 +396,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
             state->updateErrorLogged = true;
         }
         HideOverlay(window, state);
-        return;
+        return false;
     }
     const size_t pixelCount = static_cast<size_t>(width) * height;
     state->framePixels.assign(pixelCount, 0);
@@ -400,7 +495,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
     POINT source{};
     BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
     if (state->visible && state->presentedPixels == state->framePixels) {
-        return;
+        return NeedsFrameUpdates(state);
     }
     memcpy(state->pixels, state->framePixels.data(),
            pixelCount * sizeof(uint32_t));
@@ -410,7 +505,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
             Log(L"UpdateLayeredWindow failed: %u", GetLastError());
             state->updateErrorLogged = true;
         }
-        return;
+        return NeedsFrameUpdates(state);
     }
     state->updateErrorLogged = false;
     state->presentedPixels = state->framePixels;
@@ -425,6 +520,7 @@ void DrawSpectrum(HWND window, WindowState* state) {
         SetVisualizerActive(context, true);
         EnsureAboveTaskbar(window, state);
     }
+    return NeedsFrameUpdates(state);
 }
 
 void RefreshOverlayState(HWND window, WindowState* state,
@@ -504,6 +600,7 @@ void RefreshOverlayState(HWND window, WindowState* state,
                 latest.dpi);
         }
     }
+    StartFrameTimer(window, state);
 }
 
 LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message,
@@ -528,18 +625,34 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message,
                 reinterpret_cast<LONG_PTR>(create->lpCreateParams));
             return TRUE;
         }
-        case kShellStateChangedMessage:
-            RefreshOverlayState(
-                window, state, false,
-                wParam != EVENT_OBJECT_LOCATIONCHANGE);
+        case kShellStateChangedMessage: {
+            if (!state) return 0;
+            const UINT pendingChanges =
+                std::exchange(g_pendingShellStateChanges, 0u);
+            if (pendingChanges & kPendingForegroundChange) {
+                KillTimer(window, kShellStateDebounceTimer);
+                UpdateForegroundLocationHook(state);
+                RefreshOverlayState(window, state, false, true);
+            } else if (pendingChanges & kPendingLocationChange) {
+                if (!SetTimer(window, kShellStateDebounceTimer,
+                              kShellStateDebounceMs, nullptr)) {
+                    RefreshOverlayState(window, state, false, false);
+                }
+            }
             return 0;
+        }
         case WM_TIMER:
             if (!state) return 0;
             if (wParam == kStateSafetyTimer) {
                 RefreshOverlayState(window, state, true, true);
+            } else if (wParam == kShellStateDebounceTimer) {
+                KillTimer(window, kShellStateDebounceTimer);
+                RefreshOverlayState(window, state, false, false);
             } else if (wParam == kFrameTimer && state->positioned &&
                        state->eligible) {
-                DrawSpectrum(window, state);
+                if (!DrawSpectrum(window, state)) {
+                    StopFrameTimer(window, state);
+                }
             }
             return 0;
         case WM_MOUSEACTIVATE:
@@ -600,6 +713,7 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
     while (WaitForSingleObject(context.stopEvent.get(), 0) != WAIT_OBJECT_0) {
         WindowState state;
         state.context = &context;
+        state.frameInterval = frameInterval;
         // TAS_WINDHAWK_EXCLUDE_BEGIN
         state.probeMessage = probeMessage;
         // TAS_WINDHAWK_EXCLUDE_END
@@ -612,8 +726,7 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
             Log(L"Failed to create overlay window: %u", GetLastError());
             break;
         }
-        if (!SetTimer(window, kFrameTimer, frameInterval, nullptr) ||
-            !SetTimer(window, kStateSafetyTimer,
+        if (!SetTimer(window, kStateSafetyTimer,
                       kStateSafetyRefreshMs, nullptr)) {
             Log(L"Failed to create overlay timer: %u", GetLastError());
             DestroyWindow(window);
@@ -625,16 +738,16 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         g_foregroundRootWindow = foreground
             ? GetAncestor(foreground, GA_ROOT)
             : nullptr;
-        constexpr DWORD eventHookFlags =
-            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
+        g_pendingShellStateChanges = 0;
         const HWINEVENTHOOK foregroundHook = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
-            ShellStateWinEventProc, 0, 0, eventHookFlags);
-        const HWINEVENTHOOK locationHook = SetWinEventHook(
-            EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
-            nullptr, ShellStateWinEventProc, 0, 0, eventHookFlags);
-        if (!foregroundHook || !locationHook) {
-            Log(L"Foreground event watcher incomplete: %u", GetLastError());
+            ShellStateWinEventProc, 0, 0, kEventHookFlags);
+        const DWORD foregroundHookError =
+            foregroundHook ? ERROR_SUCCESS : GetLastError();
+        UpdateForegroundLocationHook(&state);
+        if (!foregroundHook) {
+            Log(L"Foreground event watcher unavailable: %u",
+                foregroundHookError);
         }
         if (rendererStarted) {
             Log(L"Spectrum renderer recreated after taskbar replacement");
@@ -647,9 +760,10 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         bool messageLoopFailed = false;
         bool ownerReplaced = false;
         while (!ownerReplaced) {
-            HANDLE waits[3] = {context.stopEvent.get(),
-                               context.layoutChangedEvent.get()};
-            DWORD waitCount = 2;
+            HANDLE waits[4] = {context.stopEvent.get(),
+                               context.layoutChangedEvent.get(),
+                               context.bandActivityEvent.get()};
+            DWORD waitCount = 3;
             DWORD searchModeWaitIndex = MAXDWORD;
             if (searchModeWatcher.changedEvent()) {
                 searchModeWaitIndex = waitCount;
@@ -666,6 +780,12 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
             if (waitResult == WAIT_OBJECT_0) break;
             if (waitResult == WAIT_OBJECT_0 + 1) {
                 RefreshOverlayState(window, &state, false, false);
+                continue;
+            }
+            if (waitResult == WAIT_OBJECT_0 + 2) {
+                if (state.positioned && state.eligible) {
+                    StartFrameTimer(window, &state);
+                }
                 continue;
             }
             if (searchModeWaitIndex != MAXDWORD &&
@@ -696,10 +816,12 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         }
         g_shellStateTargetWindow = nullptr;
         g_foregroundRootWindow = nullptr;
+        g_pendingShellStateChanges = 0;
         if (foregroundHook) UnhookWinEvent(foregroundHook);
-        if (locationHook) UnhookWinEvent(locationHook);
-        KillTimer(window, kFrameTimer);
+        if (state.locationHook) UnhookWinEvent(state.locationHook);
+        StopFrameTimer(window, &state);
         KillTimer(window, kStateSafetyTimer);
+        KillTimer(window, kShellStateDebounceTimer);
         if (IsWindow(window)) DestroyWindow(window);
         DestroySurface(&state);
         if (messageLoopFailed ||

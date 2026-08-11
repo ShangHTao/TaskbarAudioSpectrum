@@ -6,6 +6,8 @@
 #include <taskbar_audio_spectrum/standalone_host.h>
 #include <taskbar_audio_spectrum/spectrum_analysis.h>
 
+#include "../src/runtime_context.h"
+
 #include <iostream>
 #include <limits>
 
@@ -51,6 +53,11 @@ void TestConfigurationAndPlatform() {
           "valid RGB color parsing");
     Check(ParseColor(L"invalid", RGB(1, 2, 3)) == RGB(1, 2, 3),
           "invalid RGB color fallback");
+    COLORREF parsedColor = 0;
+    Check(TryParseColor(L"#ABCDEF", &parsedColor) &&
+              parsedColor == RGB(0xAB, 0xCD, 0xEF) &&
+              !TryParseColor(L"#GG0000", &parsedColor),
+          "RGB color validation reports invalid input");
     bool automatic = false;
     Check(TryParseAutoMode(L" 1 ", &automatic) && automatic,
           "numeric automatic mode parsing");
@@ -747,6 +754,35 @@ void TestSpectrumAnalysis() {
 
 void TestRenderingAndNotifications() {
     using namespace tas;
+    ApplicationContext context;
+    context.bandActivityEvent.reset(
+        CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    Check(static_cast<bool>(context.bandActivityEvent),
+          "band activity event creation");
+    if (context.bandActivityEvent) {
+        BandLevels levels{};
+        ClearPublishedBands(context);
+        PublishBandLevels(context, levels);
+        Check(WaitForSingleObject(context.bandActivityEvent.get(), 0) ==
+                  WAIT_TIMEOUT,
+              "silent bands don't wake the renderer");
+        levels[3] = 0.25f;
+        PublishBandLevels(context, levels);
+        Check(WaitForSingleObject(context.bandActivityEvent.get(), 0) ==
+                  WAIT_OBJECT_0,
+              "first non-zero band wakes the renderer");
+        levels[3] = 0.5f;
+        PublishBandLevels(context, levels);
+        Check(WaitForSingleObject(context.bandActivityEvent.get(), 0) ==
+                  WAIT_TIMEOUT,
+              "continuous signal doesn't flood renderer wakeups");
+        ClearPublishedBands(context);
+        PublishBandLevels(context, levels);
+        Check(WaitForSingleObject(context.bandActivityEvent.get(), 0) ==
+                  WAIT_OBJECT_0,
+              "signal after silence wakes the renderer again");
+    }
+
     float smoothedAt60Fps = 0.0f;
     for (int frame = 0; frame < 3; ++frame) {
         smoothedAt60Fps = SmoothDisplayLevel(

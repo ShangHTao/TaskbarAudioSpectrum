@@ -34,10 +34,10 @@ Windhawk host ------+        |
 ```
 
 `Runtime` owns three worker threads and a private `ApplicationContext`. The
-context contains an immutable settings snapshot, stop/activity/layout events,
-atomic published band levels, visualizer activity, shutdown status, and a
-synchronized search-layout store. Workers receive that context explicitly;
-there is no global worker state.
+context contains an immutable settings snapshot, stop/activity/band/layout
+events, atomic published band levels, visualizer activity, shutdown status,
+and a synchronized search-layout store. Workers receive that context
+explicitly; there is no global worker state.
 
 Each start creates a fresh context. Shutdown signals all workers and waits for
 bounded completion. If a shell call cannot be cancelled within that period,
@@ -80,12 +80,15 @@ elapsed-time attack/release smoothing and peak animation, and draws a
 low-to-high frequency gradient into a 32-bit DIB.
 
 Registry notifications and foreground/location WinEvents maintain cached
-visibility state. The overlay hides while the search interface is open, the
-foreground application is fullscreen, the search box is unavailable, opacity
-is zero, or optional silence hiding activates. Shell/display ineligibility
-deactivates WASAPI capture; silence hiding keeps capture active so new audio can
-make the overlay reappear. Ownership and z-order are repaired when Explorer
-changes without polling them on every frame.
+visibility state. Location events are scoped to the foreground process and
+coalesced before refreshing geometry. The overlay hides while the search
+interface is open, the foreground application is fullscreen, the search box
+is unavailable, opacity is zero, or optional silence hiding activates.
+Shell/display ineligibility deactivates WASAPI capture; silence hiding keeps
+capture active so new audio can make the overlay reappear. Once silent bars and
+peaks settle, the frame timer pauses until the audio worker publishes a new
+signal. Ownership and z-order are repaired when Explorer changes without
+polling them on every frame.
 
 ## Host boundary
 

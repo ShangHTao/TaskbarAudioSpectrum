@@ -118,7 +118,9 @@ multi-configuration and Ninja single-configuration build directories.
 The stress test temporarily changes taskbar Search and the current-user startup
 entry, stops other Taskbar Audio Spectrum instances, and force-restarts
 Explorer. It restores captured state in `finally`, but it can disrupt unsaved
-shell activity and must run only on an interactive test desktop.
+shell activity and must run only on an interactive test desktop. Set taskbar
+Search to the full **Search box** before starting it; the script verifies the
+OS-specific Windows 10/11 mode before changing system state.
 
 The soak test samples handle count and private memory and checks crash/hang
 events. `-LockOnce` intentionally locks the workstation and requires a normal

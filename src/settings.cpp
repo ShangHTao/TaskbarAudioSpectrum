@@ -250,15 +250,25 @@ bool InstanceTakeoverSucceeded(DWORD waitResult) {
 }
 // TAS_WINDHAWK_EXCLUDE_END
 
-COLORREF ParseColor(PCWSTR text, COLORREF fallback) {
-    if (!text || text[0] != L'#' || wcslen(text) != 7) return fallback;
+bool TryParseColor(PCWSTR text, COLORREF* color) {
+    if (!color || !text || text[0] != L'#' || wcslen(text) != 7) {
+        return false;
+    }
     int digits[6];
     for (int index = 0; index < 6; ++index) {
         digits[index] = HexValue(text[index + 1]);
-        if (digits[index] < 0) return fallback;
+        if (digits[index] < 0) return false;
     }
-    return RGB(digits[0] * 16 + digits[1], digits[2] * 16 + digits[3],
-               digits[4] * 16 + digits[5]);
+    *color = RGB(digits[0] * 16 + digits[1],
+                 digits[2] * 16 + digits[3],
+                 digits[4] * 16 + digits[5]);
+    return true;
+}
+
+COLORREF ParseColor(PCWSTR text, COLORREF fallback) {
+    COLORREF color = fallback;
+    TryParseColor(text, &color);
+    return color;
 }
 
 // TAS_WINDHAWK_EXCLUDE_BEGIN
@@ -446,12 +456,19 @@ Settings LoadSettings() {
         HostGetIntSetting(L"rightPadding", 10), 0, 40);
     loaded.barWidthPercent = std::clamp(
         HostGetIntSetting(L"barWidthPercent", 48), 15, 95);
-    loaded.color = ParseColor(
-        HostGetStringSetting(L"barColor", L"#FF78D4").c_str(),
-        RGB(255, 120, 212));
-    loaded.secondColor = ParseColor(
-        HostGetStringSetting(L"secondColor", L"#00C2FF").c_str(),
-        RGB(0, 194, 255));
+    const std::wstring barColor =
+        HostGetStringSetting(L"barColor", L"#FF78D4");
+    if (!TryParseColor(barColor.c_str(), &loaded.color)) {
+        loaded.color = RGB(255, 120, 212);
+        Log(L"Invalid barColor '%ls'; using #FF78D4", barColor.c_str());
+    }
+    const std::wstring secondColor =
+        HostGetStringSetting(L"secondColor", L"#00C2FF");
+    if (!TryParseColor(secondColor.c_str(), &loaded.secondColor)) {
+        loaded.secondColor = RGB(0, 194, 255);
+        Log(L"Invalid secondColor '%ls'; using #00C2FF",
+            secondColor.c_str());
+    }
 
     loaded.leftPadding = std::clamp(
         HostGetIntSetting(L"spectrumLeftOffset", 66), 0, 4096);

@@ -55,9 +55,9 @@ configuration value.
 | `spectrum.minCenterFrequency` | `1-20000` Hz | `31.5` | Lowest requested nominal third-octave center |
 | `spectrum.maxCenterFrequency` | `20-24000` Hz | `16000` | Highest requested nominal third-octave center |
 | `spectrum.referenceFrequency` | `20-20000` Hz | `1000` | Reference used to calculate nominal third-octave centers |
-| `spectrum.bandAggregation` | `peak`, `energy`, `mean`, `slaney` | `energy` | Method used to combine FFT-bin power in each band |
+| `spectrum.bandAggregation` | `peak`, `energy`, `mean`, `slaney` | `energy` | Method used to combine FFT-bin power; Slaney normalization is Mel-specific and otherwise matches energy |
 | `spectrum.frequencyWeighting` | `none`, `A`, `C` | `none` | Weighting applied to FFT-bin power before aggregation |
-| `spectrum.foldBelowMinimum` | Boolean | `false` | Add non-DC power below the first boundary to the first visible bar |
+| `spectrum.foldBelowMinimum` | Boolean | `false` | Add non-DC power below the first boundary on all scales except Mel, where it is ignored |
 | `spectrum.sensitivity` | `25-500` percent | `100` | Display gain applied before dB mapping |
 | `spectrum.minimumDecibels` | `-160` to `-1` dB | `-72` | Level mapped to an empty bar |
 | `spectrum.maximumDecibels` | `-120` to `0` dB | `-6` | Level mapped to full height; must exceed the minimum |

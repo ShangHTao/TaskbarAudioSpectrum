@@ -13,22 +13,38 @@ void ClearPublishedBands(ApplicationContext& context) {
     for (auto& band : context.bands) {
         band.store(0.0f, std::memory_order_relaxed);
     }
+    context.publishedSignalActive.store(false, std::memory_order_release);
 }
 
 void PublishBandLevels(ApplicationContext& context, const BandLevels& levels) {
+    bool signalActive = false;
     for (size_t index = 0; index < levels.size(); ++index) {
         context.bands[index].store(levels[index], std::memory_order_relaxed);
+        signalActive = signalActive || levels[index] > 0.0f;
+    }
+    const bool wasActive = context.publishedSignalActive.exchange(
+        signalActive, std::memory_order_acq_rel);
+    if (signalActive && !wasActive && context.bandActivityEvent) {
+        SetEvent(context.bandActivityEvent.get());
     }
 }
 
 namespace {
 
-bool WaitForThread(HANDLE thread, DWORD timeout, PCWSTR name) {
+constexpr DWORD kRuntimeShutdownTimeoutMs = 5500;
+
+bool WaitForThreadUntil(HANDLE thread, ULONGLONG deadline, PCWSTR name) {
     if (!thread) return true;
-    const DWORD result = WaitForSingleObject(thread, timeout);
+    const ULONGLONG now = GetTickCount64();
+    const DWORD remaining = now >= deadline
+        ? 0
+        : static_cast<DWORD>(std::min<ULONGLONG>(
+              deadline - now, MAXDWORD));
+    const DWORD result = WaitForSingleObject(thread, remaining);
     if (result == WAIT_OBJECT_0) return true;
     if (result == WAIT_TIMEOUT) {
-        Log(L"%ls thread did not stop within %u ms", name, timeout);
+        Log(L"%ls thread did not stop before the shared shutdown deadline",
+            name);
     } else {
         Log(L"%ls thread wait failed: %u", name, GetLastError());
     }
@@ -65,10 +81,12 @@ bool Runtime::Start(const Settings& settings) {
     context_->stopEvent.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     context_->activityChangedEvent.reset(
         CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    context_->bandActivityEvent.reset(
+        CreateEventW(nullptr, FALSE, FALSE, nullptr));
     context_->layoutChangedEvent.reset(
         CreateEventW(nullptr, FALSE, FALSE, nullptr));
     if (!context_->stopEvent || !context_->activityChangedEvent ||
-        !context_->layoutChangedEvent) {
+        !context_->bandActivityEvent || !context_->layoutChangedEvent) {
         context_.reset();
         return false;
     }
@@ -96,12 +114,14 @@ bool Runtime::Stop() {
         SetEvent(context_->activityChangedEvent.get());
     }
 
+    const ULONGLONG shutdownDeadline =
+        GetTickCount64() + kRuntimeShutdownTimeoutMs;
     const bool locatorStopped =
-        WaitForThread(locatorThread_.get(), 5500, L"Locator");
+        WaitForThreadUntil(locatorThread_.get(), shutdownDeadline, L"Locator");
     const bool overlayStopped =
-        WaitForThread(overlayThread_.get(), 3000, L"Overlay");
+        WaitForThreadUntil(overlayThread_.get(), shutdownDeadline, L"Overlay");
     const bool audioStopped =
-        WaitForThread(audioThread_.get(), 3000, L"Audio");
+        WaitForThreadUntil(audioThread_.get(), shutdownDeadline, L"Audio");
     if (!locatorStopped ||
         context_->locatorShutdownIncomplete.load(std::memory_order_acquire) ||
         !overlayStopped || !audioStopped) {

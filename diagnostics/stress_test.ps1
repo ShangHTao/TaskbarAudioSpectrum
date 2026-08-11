@@ -27,7 +27,7 @@ if (-not $builtExecutable -or -not $probe) {
 }
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) `
-    ("TaskbarAudioSpectrum-stress-" + $PID)
+    ("TaskbarAudioSpectrum-stress-" + [Guid]::NewGuid().ToString('N'))
 $testExecutable = Join-Path $testRoot 'TaskbarAudioSpectrum.exe'
 $testConfig = Join-Path $testRoot 'spectrum.json'
 $testLog = Join-Path $testRoot 'spectrum.log'
@@ -43,6 +43,8 @@ $originalRunValue = if ($originalRunExists) {
 } else { $null }
 $originalSearchMode = (Get-ItemProperty -LiteralPath $searchKey `
     -Name SearchboxTaskbarMode).SearchboxTaskbarMode
+$windowsBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
+$fullSearchMode = if ($windowsBuild -ge 22000) { 3 } else { 2 }
 $originalProcesses = @(Get-CimInstance Win32_Process `
     -Filter "Name='TaskbarAudioSpectrum.exe'" |
     Select-Object -ExpandProperty ExecutablePath -Unique)
@@ -164,6 +166,11 @@ function Assert-OverlayVisible {
 }
 
 try {
+    if ($originalSearchMode -ne $fullSearchMode) {
+        throw "Stress test requires the full taskbar Search box " +
+            "(SearchboxTaskbarMode=$fullSearchMode on build $windowsBuild); " +
+            "the current value is $originalSearchMode."
+    }
     New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
     Copy-Item -LiteralPath $builtExecutable -Destination $testExecutable
     Set-TestConfig
@@ -267,7 +274,7 @@ try {
             throw "Search hide cycle $cycle failed."
         }
         Set-ItemProperty -LiteralPath $searchKey -Name SearchboxTaskbarMode `
-            -Type DWord -Value 2
+            -Type DWord -Value $fullSearchMode
         Wait-Condition {
             & $probe --require-overlay --require-visible `
                 --require-above-taskbar --require-painted *> $null

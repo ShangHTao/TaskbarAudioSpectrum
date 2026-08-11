@@ -18,10 +18,12 @@ struct SearchLayoutState {
 struct ApplicationContext {
     Settings settings;
     std::array<std::atomic<float>, kMaxBars> bands{};
+    std::atomic<bool> publishedSignalActive{false};
     std::atomic<bool> visualizerActive{false};
     std::atomic<bool> locatorShutdownIncomplete{false};
     ScopedHandle stopEvent;
     ScopedHandle activityChangedEvent;
+    ScopedHandle bandActivityEvent;
     ScopedHandle layoutChangedEvent;
     SearchLayoutState searchLayout;
 };

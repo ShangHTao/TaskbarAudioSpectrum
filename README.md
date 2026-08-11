@@ -22,6 +22,7 @@ click-through overlay without changing how the search box works.
 - Optional A/C frequency weighting, peak markers, and silence hiding
 - Configurable gradient, opacity, smoothing, frame rate, and DPI-scaled offsets
 - Recovery after Explorer, Search, display-layout, and taskbar-setting changes
+- Event-driven idle mode that pauses rendering after silent bars and peaks settle
 - Strict UTF-8 JSON validation for the standalone edition
 - Native Windows APIs with no microphone permission or bundled third-party libraries
 

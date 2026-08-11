@@ -36,6 +36,10 @@ and linear scales. Rapid taskbar layout tracking temporarily increases geometry
 checks after the taskbar changes, which helps the overlay follow animations and
 layout updates.
 
+The default 16384-point FFT prioritizes low-frequency resolution. Select 4096
+for faster-looking motion when resolving the lowest third-octave bands is less
+important.
+
 Unlike **Taskbar Fluent Media Player**, this mod doesn't add a media-player
 widget. Unlike **Desktop Audio Visualizer**, it renders inside the taskbar search
 box. It runs in a dedicated `windhawk.exe` tool process instead of injecting the
@@ -77,7 +81,7 @@ Source, standalone downloads, and detailed documentation are available on the
   $description: Reference used to calculate nominal third-octave centers; ignored by other scales.
 - bandAggregation: "energy"
   $name: Band amplitude calculation
-  $description: Method used to combine FFT bins inside each frequency band.
+  $description: Method used to combine FFT bins. Slaney normalization is specific to Mel; on other scales it matches energy.
   $options:
   - "peak": Peak
   - "energy": Energy
@@ -92,10 +96,10 @@ Source, standalone downloads, and detailed documentation are available on the
   - "C": C-weighting
 - foldBelowMinimum: false
   $name: Fold lower frequencies into first bar
-  $description: Adds energy below the configured minimum to the first visible band.
+  $description: Adds energy below the configured minimum to the first visible band on third-octave, Bark, logarithmic, and linear scales; ignored by Mel.
 - fftSize: 16384
   $name: FFT size
-  $description: Analysis window size; supported values are 4096, 8192, and 16384.
+  $description: Analysis window size. 4096 reacts faster; 16384 resolves the lowest third-octave bands more accurately but adds latency. Supported values are 4096, 8192, and 16384.
 - overlapPercent: 75
   $name: FFT overlap (percent)
   $description: Overlap between consecutive analysis windows. Higher values update the analysis more often and use more CPU.
@@ -180,5 +184,3 @@ Source, standalone downloads, and detailed documentation are available on the
   $description: Temporarily checks geometry more frequently after taskbar layout changes.
 */
 // ==/WindhawkModSettings==
-
-#define TAS_WINDHAWK_HOST
