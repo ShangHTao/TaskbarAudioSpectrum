@@ -162,6 +162,7 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
             size_t writeIndex = 0;
             size_t bufferedFrames = 0;
             size_t framesSinceAnalysis = 0;
+            SignalWindowTracker signalWindow(fftSamples);
             const DWORD idleTimeoutMs = std::max<DWORD>(
                 100, static_cast<DWORD>(
                     (static_cast<uint64_t>(plan.hopSamples) * 2000 +
@@ -169,6 +170,7 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
                     format->nSamplesPerSec));
             bool streamIdle = false;
             bool signalSeen = false;
+            bool silencePublished = false;
             ULONGLONG lastPacketTick = GetTickCount64();
             const auto enterStreamIdle = [&] {
                 if (streamIdle) return;
@@ -178,9 +180,11 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
                 writeIndex = 0;
                 bufferedFrames = fftSamples;
                 framesSinceAnalysis = 0;
+                signalWindow.ResetToSilence();
                 ClearBands(&levels);
                 ClearPublishedBands(context);
                 signalSeen = false;
+                silencePublished = true;
                 streamIdle = true;
                 Log(L"Audio stream idle for %u ms; spectrum cleared",
                     idleTimeoutMs);
@@ -249,21 +253,45 @@ DWORD WINAPI AudioThreadProc(void* parameter) {
                         writeIndex = 0;
                         bufferedFrames = 0;
                         framesSinceAnalysis = 0;
+                        signalWindow.ResetToSilence();
                     }
                     const BYTE* copiedData = silent ? nullptr
                                                     : packetData.data();
                     for (UINT32 frame = 0; frame < frames; ++frame) {
+                        bool frameContainsSignal = false;
                         for (int channel = 0; channel < analysisChannels;
                              ++channel) {
-                            samples[channel][writeIndex] =
-                                silent ? 0.0f
-                                       : ReadSample(copiedData, frame, channel,
-                                                    format);
+                            const float sample = silent
+                                ? 0.0f
+                                : ReadSample(copiedData, frame, channel,
+                                             format);
+                            samples[channel][writeIndex] = sample;
+                            frameContainsSignal =
+                                frameContainsSignal || sample != 0.0f;
                         }
+                        const bool signalResumed = frameContainsSignal &&
+                            !signalWindow.ContainsSignal();
+                        signalWindow.PushFrame(frameContainsSignal);
                         writeIndex = (writeIndex + 1) % fftSamples;
                         bufferedFrames = std::min(
                             bufferedFrames + 1, fftSamples);
                         ++framesSinceAnalysis;
+                        if (bufferedFrames == fftSamples &&
+                            !signalWindow.ContainsSignal()) {
+                            if (!silencePublished) {
+                                ClearBands(&levels);
+                                PublishBandLevels(context, levels);
+                                signalSeen = false;
+                                silencePublished = true;
+                            }
+                            framesSinceAnalysis = 0;
+                            continue;
+                        }
+                        if (signalResumed) {
+                            framesSinceAnalysis = std::max(
+                                framesSinceAnalysis, hopSamples);
+                            silencePublished = false;
+                        }
                         if (bufferedFrames == fftSamples &&
                             framesSinceAnalysis >= hopSamples) {
                             AnalyzeChannels(samples, writeIndex, plan,

@@ -577,10 +577,16 @@ void TestSpectrumAnalysis() {
                          melPlan.centerFrequency[band + 1]) < 0.01f;
         }
     }
-    Check(std::abs(melPlan.lowerFrequency[0] - 31.5f) < 0.01f &&
+    Check(!melPlan.foldBelowMinimum &&
+              std::abs(melPlan.lowerFrequency[0] - 31.5f) < 0.01f &&
               std::abs(melPlan.upperFrequency[23] - 16000.0f) < 1.0f &&
               overlappingMelTriangles && slaneyNormalized,
-          "overlapping HTK Mel triangles with Slaney area normalization");
+          "HTK Mel ignores low-frequency folding and uses Slaney triangles");
+
+    g_settings.bandAggregation = BandAggregation::Peak;
+    const AnalysisPlan melPeakPlan = MakeAnalysisPlan(48000, g_settings);
+    Check(!melPeakPlan.foldBelowMinimum,
+          "HTK Mel peak aggregation also ignores low-frequency folding");
 
     g_settings.frequencyScale = FrequencyScale::Linear;
     g_settings.bandAggregation = BandAggregation::Peak;
@@ -751,6 +757,25 @@ void TestSpectrumAnalysis() {
 
 void TestRenderingAndNotifications() {
     using namespace tas;
+
+    SignalWindowTracker signalWindow(4);
+    Check(!signalWindow.ContainsSignal(),
+          "signal-window tracking begins in the silent state");
+    signalWindow.PushFrame(true);
+    for (int frame = 0; frame < 3; ++frame) {
+        signalWindow.PushFrame(false);
+    }
+    Check(signalWindow.ContainsSignal(),
+          "a nonzero frame remains active while it is in the FFT window");
+    signalWindow.PushFrame(false);
+    Check(!signalWindow.ContainsSignal(),
+          "a full zero window suppresses further FFT analysis");
+    signalWindow.PushFrame(true);
+    Check(signalWindow.ContainsSignal(),
+          "the first nonzero frame resumes FFT analysis immediately");
+    signalWindow.ResetToSilence();
+    Check(!signalWindow.ContainsSignal(),
+          "stream resets restore the known-silent window state");
     ApplicationContext context;
     context.bandActivityEvent.reset(
         CreateEventW(nullptr, FALSE, FALSE, nullptr));

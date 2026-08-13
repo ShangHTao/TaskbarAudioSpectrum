@@ -276,7 +276,8 @@ AnalysisPlan MakeAnalysisPlan(int sampleRate, const Settings& settings) {
     plan.minimumDecibels = settings.minimumDecibels;
     plan.maximumDecibels = settings.maximumDecibels;
     plan.bandAggregation = settings.bandAggregation;
-    plan.foldBelowMinimum = settings.foldBelowMinimum;
+    plan.foldBelowMinimum = settings.foldBelowMinimum &&
+        settings.frequencyScale != FrequencyScale::HtkMel;
     plan.binWidth = sampleRate / static_cast<float>(plan.fftSize);
     plan.binPowerGain.resize(plan.fftBins, 1.0f);
     for (int bin = 1; bin < plan.fftBins; ++bin) {
@@ -390,7 +391,7 @@ AnalysisPlan MakeAnalysisPlan(int sampleRate, const Settings& settings) {
             continue;
         }
         const float analysisLower =
-            band == 0 && settings.foldBelowMinimum ? 0.0f : lower;
+            band == 0 && plan.foldBelowMinimum ? 0.0f : lower;
         for (int bin = 1; bin < plan.fftBins; ++bin) {
             const float binLower = std::max(0.0f, (bin - 0.5f) * plan.binWidth);
             const float binUpper = (bin + 0.5f) * plan.binWidth;
