@@ -13,7 +13,6 @@ struct SearchLayout {
     bool valid = false;
 };
 DWORD GetSearchMode();
-bool IsSearchBoxMode(DWORD mode, SearchHostKind hostKind);
 bool IsSearchBoxMode(DWORD mode);
 int ScaleForDpi(int value, UINT dpi);
 RECT CalculateSpectrumBounds(const SearchLayout& layout,

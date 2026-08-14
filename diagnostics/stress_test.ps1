@@ -43,8 +43,7 @@ $originalRunValue = if ($originalRunExists) {
 } else { $null }
 $originalSearchMode = (Get-ItemProperty -LiteralPath $searchKey `
     -Name SearchboxTaskbarMode).SearchboxTaskbarMode
-$windowsBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
-$fullSearchMode = if ($windowsBuild -ge 22000) { 3 } else { 2 }
+$fullSearchMode = 2
 $originalProcesses = @(Get-CimInstance Win32_Process `
     -Filter "Name='TaskbarAudioSpectrum.exe'" |
     Select-Object -ExpandProperty ExecutablePath -Unique)
@@ -168,7 +167,7 @@ function Assert-OverlayVisible {
 try {
     if ($originalSearchMode -ne $fullSearchMode) {
         throw "Stress test requires the full taskbar Search box " +
-            "(SearchboxTaskbarMode=$fullSearchMode on build $windowsBuild); " +
+            "(SearchboxTaskbarMode=$fullSearchMode); " +
             "the current value is $originalSearchMode."
     }
     New-Item -ItemType Directory -Path $testRoot -Force | Out-Null

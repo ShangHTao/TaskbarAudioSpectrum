@@ -397,15 +397,9 @@ void TestConfigurationAndPlatform() {
               DetectSearchHostKind(L"explorer.exe") ==
               SearchHostKind::Unknown,
           "Windows 10 and Windows 11 search hosts are distinguished");
-    Check(!IsSearchBoxMode(0, SearchHostKind::Windows10) &&
-              !IsSearchBoxMode(1, SearchHostKind::Windows10) &&
-              IsSearchBoxMode(2, SearchHostKind::Windows10) &&
-              !IsSearchBoxMode(3, SearchHostKind::Windows10) &&
-              !IsSearchBoxMode(2, SearchHostKind::Windows11) &&
-              IsSearchBoxMode(3, SearchHostKind::Windows11) &&
-              !IsSearchBoxMode(2, SearchHostKind::Unknown) &&
-              IsSearchBoxMode(3, SearchHostKind::Unknown),
-          "search-box mode respects the Windows search host generation");
+    Check(!IsSearchBoxMode(0) && !IsSearchBoxMode(1) &&
+              IsSearchBoxMode(2) && !IsSearchBoxMode(3),
+          "only the full search-box mode is accepted");
 }
 
 void TestSpectrumAnalysis() {
