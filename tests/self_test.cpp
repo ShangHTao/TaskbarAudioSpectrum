@@ -371,6 +371,13 @@ void TestConfigurationAndPlatform() {
     Check(automaticBounds.left == 83 && automaticBounds.right == 262 &&
               automaticBounds.top == 6 && automaticBounds.bottom == 34,
           "automatic positioning honors all four DPI-scaled edge offsets");
+    layout.valid = true;
+    Check(HasUsableSearchBoxGeometry(layout, g_settings),
+          "full search-box geometry provides a usable spectrum area");
+    SearchLayout narrowLayout = layout;
+    narrowLayout.rect = {0, 0, 133, 60};
+    Check(!HasUsableSearchBoxGeometry(narrowLayout, g_settings),
+          "search icon-and-label geometry is rejected");
     g_settings.autoPosition = false;
     g_settings.leftPadding = 120;
     Check(CalculateSpectrumBounds(layout, g_settings).left == 150,
@@ -397,9 +404,6 @@ void TestConfigurationAndPlatform() {
               DetectSearchHostKind(L"explorer.exe") ==
               SearchHostKind::Unknown,
           "Windows 10 and Windows 11 search hosts are distinguished");
-    Check(!IsSearchBoxMode(0) && !IsSearchBoxMode(1) &&
-              IsSearchBoxMode(2) && !IsSearchBoxMode(3),
-          "only the full search-box mode is accepted");
 }
 
 void TestSpectrumAnalysis() {

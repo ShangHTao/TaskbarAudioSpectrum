@@ -49,7 +49,6 @@ struct WindowState {
     UINT frameInterval = 0;
     HWND ownerTaskbar = nullptr;
     HWINEVENTHOOK locationHook = nullptr;
-    DWORD searchMode = 0;
     bool searchInterfaceOpen = false;
     bool searchInterfaceWasOpen = false;
     ULONGLONG lastZOrderLog = 0;
@@ -531,16 +530,12 @@ bool DrawSpectrum(HWND window, WindowState* state) {
 }
 
 void RefreshOverlayState(HWND window, WindowState* state,
-                         bool refreshSearchMode,
                          bool refreshSearchInterface) {
     if (!state) return;
     if (state->context->settings.opacity == 0) {
         state->eligible = false;
         HideOverlay(window, state);
         return;
-    }
-    if (refreshSearchMode) {
-        state->searchMode = GetSearchMode();
     }
     if (refreshSearchInterface) {
         state->searchInterfaceOpen = IsSearchInterfaceOpen();
@@ -563,8 +558,7 @@ void RefreshOverlayState(HWND window, WindowState* state,
         return;
     }
     const bool fullscreenForeground = IsFullscreenForeground(latest);
-    if (!ShouldShowOverlay(latest, state->searchMode,
-                           state->searchInterfaceOpen,
+    if (!ShouldShowOverlay(latest, state->searchInterfaceOpen,
                            fullscreenForeground)) {
         state->eligible = false;
         HideOverlay(window, state);
@@ -639,11 +633,11 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message,
             if (pendingChanges & kPendingForegroundChange) {
                 KillTimer(window, kShellStateDebounceTimer);
                 UpdateForegroundLocationHook(state);
-                RefreshOverlayState(window, state, false, true);
+                RefreshOverlayState(window, state, true);
             } else if (pendingChanges & kPendingLocationChange) {
                 if (!SetTimer(window, kShellStateDebounceTimer,
                               kShellStateDebounceMs, nullptr)) {
-                    RefreshOverlayState(window, state, false, false);
+                    RefreshOverlayState(window, state, false);
                 }
             }
             return 0;
@@ -651,10 +645,10 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message,
         case WM_TIMER:
             if (!state) return 0;
             if (wParam == kStateSafetyTimer) {
-                RefreshOverlayState(window, state, true, true);
+                RefreshOverlayState(window, state, true);
             } else if (wParam == kShellStateDebounceTimer) {
                 KillTimer(window, kShellStateDebounceTimer);
-                RefreshOverlayState(window, state, false, false);
+                RefreshOverlayState(window, state, false);
             } else if (wParam == kFrameTimer && state->positioned &&
                        state->eligible) {
                 if (!DrawSpectrum(window, state)) {
@@ -712,12 +706,6 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         static_cast<UINT>((1000 + context.settings.fps / 2) /
                           context.settings.fps),
         USER_TIMER_MINIMUM, 1000);
-    RegistryChangeWatcher searchModeWatcher;
-    if (searchModeWatcher.Start(kSearchSettingsRegistryPath)) {
-        Log(L"Overlay search mode watcher started");
-    } else {
-        Log(L"Overlay search mode watcher unavailable; using safety refresh");
-    }
     bool rendererStarted = false;
     while (WaitForSingleObject(context.stopEvent.get(), 0) != WAIT_OBJECT_0) {
         WindowState state;
@@ -765,19 +753,14 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
         }
         rendererStarted = true;
 
-        RefreshOverlayState(window, &state, true, true);
+        RefreshOverlayState(window, &state, true);
         bool messageLoopFailed = false;
         bool ownerReplaced = false;
         while (!ownerReplaced) {
-            HANDLE waits[4] = {context.stopEvent.get(),
+            HANDLE waits[3] = {context.stopEvent.get(),
                                context.layoutChangedEvent.get(),
                                context.bandActivityEvent.get()};
-            DWORD waitCount = 3;
-            DWORD searchModeWaitIndex = MAXDWORD;
-            if (searchModeWatcher.changedEvent()) {
-                searchModeWaitIndex = waitCount;
-                waits[waitCount++] = searchModeWatcher.changedEvent();
-            }
+            constexpr DWORD waitCount = ARRAYSIZE(waits);
             const DWORD waitResult = MsgWaitForMultipleObjectsEx(
                 waitCount, waits, INFINITE, QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE);
@@ -788,22 +771,13 @@ DWORD WINAPI OverlayThreadProc(void* parameter) {
             }
             if (waitResult == WAIT_OBJECT_0) break;
             if (waitResult == WAIT_OBJECT_0 + 1) {
-                RefreshOverlayState(window, &state, false, false);
+                RefreshOverlayState(window, &state, false);
                 continue;
             }
             if (waitResult == WAIT_OBJECT_0 + 2) {
                 if (state.positioned && state.eligible) {
                     StartFrameTimer(window, &state);
                 }
-                continue;
-            }
-            if (searchModeWaitIndex != MAXDWORD &&
-                waitResult == WAIT_OBJECT_0 + searchModeWaitIndex) {
-                if (!searchModeWatcher.Arm()) {
-                    Log(L"Overlay search mode watcher could not be rearmed");
-                    searchModeWatcher.Stop();
-                }
-                RefreshOverlayState(window, &state, true, false);
                 continue;
             }
             if (waitResult != WAIT_OBJECT_0 + waitCount) {
